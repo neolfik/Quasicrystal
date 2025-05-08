@@ -28,6 +28,8 @@ Used to add a density around the points that correspond with a Gaussian distribu
 
 Used for the generation of the quasicrystal. It uses parallelization and polygon overlap checks, so the `concurrent.futures` and `shapely` packages are needed. Install them before generating the quasicrystal. If you do not want to generate the quasicrystal or do not want to download the packages, use the `.txt` files in the `points` subfolder.
 
+The quasicrystal can be generated up to 22 cycles, anything above that reaches a point, where two styles of generation used in the program are not enough for the type of checks performed, and the lattice will have errors.
+
 ### 🔸 `quasi_tiling`
 
 Used to define the unit of the quasicrystal and its generation from three points, along with a few other point manipulation functions that are used more frequently.
