@@ -1,3 +1,4 @@
+
 # Fourier Transform of Quasicrystal Density Project
 
 This is the README file for the Fourier Transform of Quasicrystal Density project.
@@ -14,7 +15,7 @@ This folder contains plots of all generated grids, either quasicrystal or hexago
 
 ### 🔹 points
 
-This folder contains `.txt` files of generated points for the quasicrystal. This was needed due to the time required for quasicrystal generation with the first-generation programs. It can be rewritten to generate everything altogether, but this approach saves time for other users since the quasicrystal is already generated.
+This folder contains `.txt` files of generated points for the quasicrystal. This was needed due to the time required for quasicrystal generation; the recursion of the first two to three repetitions is rather fast in a matter of a few minutes, thanks to parallelization.
 
 ---
 
@@ -22,15 +23,15 @@ This folder contains `.txt` files of generated points for the quasicrystal. This
 
 ### 🔸 `add_gauss`
 
-Used to add a density around the points that correspond with a Gaussian distribution.
+Used to add a density around the points that correspond with a Gaussian distribution. It returns a map of specified accuracy. Be mindful when choosing the accuracy, as the computation time rises fast with the size of the map.
 
-### 🔸 `generate_mech_bcup2`
+### 🔸 `recursive_generation`
 
-Used for the generation of the quasicrystal. It uses parallelization and polygon overlap checks, so the `concurrent.futures` and `shapely` packages are needed. Install them before generating the quasicrystal. If you do not want to generate the quasicrystal or do not want to download the packages, use the `.txt` files in the `points` subfolder.
+Used for the generation of the quasicrystal. It uses parallelization with `concurrent.futures` to make the generation of higher repetitions. Install the package before generating the quasicrystal. If you do not want to generate the quasicrystal or do not want to download the packages, use the `.txt` files in the `points` subfolder. When generating the number of points rises very quickly at 4 repetitions, the program outputs around 1 million points, and at 5 repetitions, the program outputs approximately 12 million points, and the .txt file has 250 MB.
 
-### 🔸 `quasi_tiling`
+### 🔸 `utilities`
 
-Used to define the unit of the quasicrystal and its generation from three points, along with a few other point manipulation functions that are used more frequently.
+This file contains functions frequently used in other files. 
 
 ### 🔸 `main`
 

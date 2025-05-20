@@ -1,54 +1,64 @@
 import numpy as np
+from scipy.ndimage import shift
+from concurrent.futures import ProcessPoolExecutor
 
-## This part of code is used to add 2D Gaussian distribution to an array of points
+## In this file provided array of points is transformed into map with gaussians at each input point. Given the number of points, the method
+# used evaluates the gaussian on a smaller map around origin and then shifts existing map into position of the input points.
+# This method is faster, than computing the additives of each input point, for higher number of points.
 
-
-def gauss(x, y, p, sig):
+## Prepare function for paralelization further in the code
+def process_point(args):
     """
-    Defines Gaussina distribution
-
-    Parameters:
-        x (float) - x coordinate
-        y (float) - y coordinate
-        p (numpy.ndarray) - origin point
-        sig (float) - Broadening of the distribution or the standard deviation
+    Moves gaussian distribution from the origin to a specified point and returns the shifted map
     """
-    ## The Gaussian is defined so that its shift can be easily controled by the coordinates of the points
-    return 1 / (2 * np.pi * sig**2) * np.exp(-((x - p[0])**2 + (y - p[1])**2) / (2 * sig**2))
+    px, py, dx, dy, origin_array = args
+    shift_y = py / dy
+    shift_x = px / dx
+    return shift(origin_array, shift=(shift_y, shift_x), order=1, mode='constant')
 
 def add_points(points, sig, N):
     """
-    Adds Gaussians to points on input and generates a map of values
-
-    Parameters:
-        points (numpy.ndarray) - input points
-        sig (float) - standard deviation of added Gaussians
-        N (int) - Number of values in one principal direction of the map
+    Adds gaussians to each input point with specified standart deviation and a specified accuracy of the map
     """
-    ## Here based on the scale of the points the program makes an array of points in which the Gaussians are evaluated 
-    # with a 10% size buffer on all sides The program may be little faster with smaller buffer since the Gaussians don't 
-    # need to be added to the unused area
     min_x, max_x = np.min(points[:, 0]), np.max(points[:, 0])
     min_y, max_y = np.min(points[:, 1]), np.max(points[:, 1])
 
+    ## Add a 10% buffer to the map to make the resulting plots more user friendly by incorporating the edge of the crystal
     buffer_x = 0.1 * (max_x - min_x) if max_x != min_x else 1.0
     buffer_y = 0.1 * (max_y - min_y) if max_y != min_y else 1.0
 
     x0, x1 = min_x - buffer_x, max_x + buffer_x
     y0, y1 = min_y - buffer_y, max_y + buffer_y
 
-    x = np.linspace(x0, x1, N)
-    y = np.linspace(y0, y1, N)
+    difx = x1 - x0
+    dify = y1 - y0
+
+    diff = max(abs(difx), abs(dify))
+    x = np.linspace(-diff/2, diff/2, 2*N)
+    y = np.linspace(-diff/2, diff/2, 2*N)
     xx, yy = np.meshgrid(x, y)
+    
+    dx = x[1] - x[0]
+    dy = y[1] - y[0]
 
-    map = np.zeros_like(xx)
+    ## Define the gaussian in origin that is to be shifted to the input points
+    origin = np.exp(-((xx)**2 + (yy)**2) / (2 * sig**2))
+    result = np.zeros_like(origin)
 
-    # Adds a Gaussian for each point and tracks a count of the Gaussians added, since the program from main.py can run quite long
-    i = 0
-    for p in points:
-        i+=100
-        map += gauss(xx, yy, p, sig)
-        print(f'Adding Gaussians to point mesh: {round(i/points.shape[0],2)} %', end = '\r')
+
+    args_list = [(px, py, dx, dy, origin) for px, py in points]
+    
+    ## For each point shift and add the gaussian from the origin to specified position in respect to the indexing of the map
+    with ProcessPoolExecutor() as executor:
+        for shifted in executor.map(process_point, args_list):
+            result += shifted
+    
+    ## Multiply the resulting map by a constant to normalize the values
+    result = (1 / (2 * np.pi * sig**2)) * result  
+
+    ## Make a corrected map by multiplying the whole map with gaussian using standart deviation equal to 2/9 of radius. This ensures that
+    # three time the standart deviation is in 2/3 of the radius, and thus correction has the desired effect. The correction should supress 
+    # the lower maxima caused by the fact, that the used lattice is finite.
+    result2 = result * np.exp(-(xx**2+yy**2)/(8*diff**2/81)) * (1 / (8 * np.pi * diff**2/81))
     print(f'Gaussians added for parameters sigma = {sig} and N = {N}')
-
-    return map, x, y, (x0, x1, y0, y1)
+    return result2,result, x, y, (x0, x1, y0, y1)

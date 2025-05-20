@@ -1,150 +1,89 @@
 import os
-import glob
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.fft import fft2
-import generate_mesh_bcup2 as gm
+import recursive_generation as rg
 import add_gauss as ag
+from utilities import (
+    hexagonal,
+    plot_fft_and as pf
+)
+
 
 ## This file consists of two parts, each separated by exit() function so that they do not run simultaniously due to their complexity
 # and time needed for completion
 
-## The first part takes generated points from .txt files in points folder and adds gaussians to the points onto a map 1000x1000 or other
-# specified accuracy. The program then shows the map and does a 2D fourier transform of the map, plots the FT and saves all the plot
-# Based on the furthest point in .txt file it makes a hexagonal grid and repeats the porces with the points of hexagonal grid
+## The first part takes generated points from .txt files in points folder and adds gaussians to the points in a specified radius onto a map 
+# 500x500 or other specified accuracy, it also makes a correction of the map via multiplying by a gaussian distribution with 3*sigma = 2/3*radius
+# The program then shows the map and does a 2D fourier transform of the map and its correction, plots the FT zoomed to an area with values
+# over 5% of the maximal value and saves all the plots.
+# Based on the furthest point in the .txt file it makes a hexagonal grid and repeats the process with the points of the hexagonal grid.
 
-## minimal time each plot is shown
-T = 0.5
-
-## Parameters
-sigmas = [0.02, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25,0.3]
-Ns = [1000] * len(sigmas)
-a = 1
 
 ## Ensure base saving folder exists
 base_folder = 'Saved_figures'
 os.makedirs(base_folder, exist_ok=True)
 
+## Settings of evaluated distances or radii, the mean deviation used for the gaussians, accuracy ar size of the map with gaussians and
+# the lattice parameter
+distances = [5,10,15,20]
+sigmas = [0.08,0.15,0.2,0.3]
+N = 1000
+a = 1
 
-def dynamic_zoom_region(arr, threshold_ratio=0.1, padding=10):
-    ## Zoomes the FT to a range at which the main peaks are realized with a certain threshold ratio relative to the maximum value
-    max_val = np.max(arr)
-    mask = arr > (threshold_ratio * max_val)
-    coords = np.argwhere(mask)
+## Load file used to chose the points
+txt_file = os.path.join("points", "recursive_2.txt")
+points = np.loadtxt(txt_file, delimiter=",")
 
-    if coords.size == 0:
-        # fallback to center square crop if no peaks found
-        center = np.array(arr.shape) // 2
-        half_size = min(arr.shape) // 10
-        return tuple(slice(center[i] - half_size, center[i] + half_size) for i in range(2))
+## Ensure there are no duplicates, even though there should not be any based on the implementation of points generation
+points = np.unique(np.round(points, 3), axis=0)
+radii = np.linalg.norm(points, axis=1)
 
-    top_left = np.maximum(coords.min(axis=0) - padding, 0)
-    bottom_right = np.minimum(coords.max(axis=0) + padding, np.array(arr.shape))
+for radius in distances:
+    ## Select points within the specified distance
+    mask = radii <= 2*radius
+    selected_points = points[mask]
 
-    height = bottom_right[0] - top_left[0]
-    width = bottom_right[1] - top_left[1]
-    side = max(height, width)
+    ## Generate hexagonal grid for this radius in a square shape, the grid is bigger than the actual radius to ensure all valid points 
+    # are present before choosing only those in the appropriate radius.
+    H = int(np.round(8 * radius))
+    D = int(np.round(6 * radius * np.sqrt(3)))
+    hex_points = hexagonal(D, H, a)
+    
+    ## Select points within a specified distance
+    radiih = np.linalg.norm(hex_points, axis=1)
+    mask2 = radiih <= 2*radius
+    hex_points = hex_points[mask2]
 
-    center = (top_left + bottom_right) // 2
-    half_side = side // 2
+    # Set up directory structure
+    radius_folder = os.path.join(base_folder, f"recursive_3_radius_{radius}")
+    os.makedirs(radius_folder, exist_ok=True)
 
-    start = np.maximum(center - half_side, 0)
-    end = np.minimum(start + side, np.array(arr.shape))
-
-    start = np.maximum(end - side, 0)
-
-    return tuple(slice(start[i], end[i]) for i in range(2))
-
-## For loop through the .txt files
-for txt_file in glob.glob(os.path.join("points","*.txt")):
-    points = np.loadtxt(txt_file, delimiter=",")
-    points = np.unique(np.round(points, 3), axis=0)
-
-    ## generating the hexagonal grid
-    maxdist = int(np.floor(np.max(np.linalg.norm(points, axis=1))))
-    H = 2 * maxdist
-    D = int(np.floor(4*maxdist/np.sqrt(3)))
-
-    hex_points = gm.hexagonal(D, H, a)
-
-    ## Make folder based in the filename
-    file_base = os.path.splitext(txt_file)[0]
-    file_folder = os.path.join(base_folder, file_base)
-    os.makedirs(file_folder, exist_ok=True)
-
-    ## For starting parameters make the plots
-    for sigma, N in zip(sigmas, Ns):
-        sigma_folder = os.path.join(file_folder, f"sigma_{sigma}")
+    for sigma in sigmas:
+        sigma_folder = os.path.join(radius_folder, f"sigma_{sigma}")
         os.makedirs(sigma_folder, exist_ok=True)
 
-        map1, x1, y1, extent1 = ag.add_points(hex_points, sigma, N)
-        map2, x2, y2, extent2 = ag.add_points(points, sigma, N)
+        
+        # Add gaussians
+        map11, map12, x1, y1, extent1 = ag.add_points(hex_points, sigma, N)
+        map21, map22, x2, y2, extent2 = ag.add_points(selected_points, sigma, N)
 
-        plt.figure(figsize=(8, 6))
-        plt.imshow(map1, extent=extent1, origin='lower', cmap='hot')
-        plt.colorbar(label='Gaussian Intensity')
-        plt.title(f"Gaussian Map (Hexagonal grid): σ={sigma}, N={N}")
-        plt.xlabel("X")
-        plt.ylabel("Y")
-        plt.tight_layout()
-        plt.savefig(f"{sigma_folder}/hexmap_sigma{sigma}_N{N}.png")
-        plt.pause(T)
-        plt.close()
+        ## Plots all the maps and saves the plots
+        pf(map11, extent1, "Hexagonal_", sigma_folder,sigma,N,radius,cor=True)
+        pf(map12, extent1, "Hexagonal_", sigma_folder,sigma,N,radius)
+        pf(map21, extent2, "Quasicrystal_", sigma_folder,sigma,N,radius,cor=True)
+        pf(map22, extent2, "Quasicrystal_", sigma_folder,sigma,N,radius)
 
-        fft1 = fft2(map1)
-        fft1_mag = np.abs(np.fft.fftshift(fft1))
-        zoom_slice = dynamic_zoom_region(fft1_mag)
-        plt.figure(figsize=(8, 6))
-        plt.imshow(fft1_mag[zoom_slice], cmap='viridis')
-        plt.title(f"Zoomed FFT (Hexagonal grid): σ={sigma}, N={N}")
-        plt.xlabel("Freq X")
-        plt.ylabel("Freq Y")
-        plt.colorbar(label='Magnitude')
-        plt.tight_layout()
-        plt.savefig(f"{sigma_folder}/hexfft_zoomed_sigma{sigma}_N{N}.png")
-        plt.pause(T)
-        plt.close()
 
-        # Save point-based Gaussian map
-        plt.figure(figsize=(8, 6))
-        plt.imshow(map2, extent=extent2, origin='lower', cmap='hot')
-        plt.colorbar(label='Gaussian Intensity')
-        plt.title(f"Gaussian Map (Quasicrystal) ({txt_file}): σ={sigma}, N={N}")
-        plt.xlabel("X")
-        plt.ylabel("Y")
-        plt.tight_layout()
-        plt.savefig(f"{sigma_folder}/pointmap_sigma{sigma}_N{N}.png")
-        plt.pause(T)
-        plt.close()
-
-        # Save point-based FFT (zoomed)
-        fft2_res = fft2(map2)
-        fft2_mag = np.abs(np.fft.fftshift(fft2_res))
-        zoom_slice2 = dynamic_zoom_region(fft2_mag)
-        plt.figure(figsize=(8, 6))
-        plt.imshow(fft2_mag[zoom_slice2], cmap='viridis')
-        plt.title(f"Zoomed FFT (Quasicrystal) ({txt_file}): σ={sigma}, N={N}")
-        plt.xlabel("Freq X")
-        plt.ylabel("Freq Y")
-        plt.colorbar(label='Magnitude')
-        plt.tight_layout()
-        plt.savefig(f"{sigma_folder}/pointfft_zoomed_sigma{sigma}_N{N}.png")
-        plt.pause(T)
-        plt.close()
 exit()
 
-## Generates and plots the quasicrystal
+## Is used for generation of points, put this at the start of the code after importing used packages to activate this part.
+# Be mindful when chosing the number of iterations, at 4 the code outputs 1 million points and is 18MB, at 5 the code outputs 12 million
+# points and 250MB file. For the evaluation above only 3 iterations are used.
+
 if __name__ == '__main__':
-    points, temp = gm.quasicrystal(35, 1)
-    np.savetxt('points/points1.txt', points, fmt='%.6f', delimiter=',')
-    fig, ax = plt.subplots(figsize=(8,8))
-    ax.set_xlim(-12, 12)
-
-    ax.set_ylim(-12, 12)
-
-    ax.plot(points[:,0],points[:,1],'.')
-    ax.plot(temp[:,0],temp[:,1],'x', color = 'red')
-
+    points = rg.quasicrystal(1,np.array([0,0]),2)
+    np.savetxt('points/recursive_2.txt', points, fmt='%.6f', delimiter=',')
+    plt.plot(points[:,0],points[:,1],',',color = 'black')
     plt.show()
 exit()
 
